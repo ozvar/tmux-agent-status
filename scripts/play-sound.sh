@@ -65,14 +65,14 @@ esac
 # Run sound players in foreground - callers background this script with &
 if [ -n "${BUNDLED_SOUND:-}" ] && [ -f "$BUNDLED_SOUND" ]; then
     if command -v paplay >/dev/null 2>&1; then
-        paplay "$BUNDLED_SOUND" 2>/dev/null
+        paplay --volume=32768 "$BUNDLED_SOUND" 2>/dev/null
     elif command -v afplay >/dev/null 2>&1; then
         afplay "$BUNDLED_SOUND" 2>/dev/null
     elif command -v aplay >/dev/null 2>&1; then
         aplay "$BUNDLED_SOUND" 2>/dev/null
     fi
 elif command -v paplay >/dev/null 2>&1 && [ -f "$LINUX_SOUND" ]; then
-    paplay "$LINUX_SOUND" 2>/dev/null
+    paplay --volume=32768 "$LINUX_SOUND" 2>/dev/null
 elif command -v afplay >/dev/null 2>&1; then
     afplay "/System/Library/Sounds/$MAC_SOUND" 2>/dev/null
 elif command -v beep >/dev/null 2>&1; then
