@@ -97,7 +97,8 @@ tmux set-option -g status-interval 1
 # Check if our status is already in the status-right
 current_status_right=$(tmux show-option -gqv status-right)
 if ! echo "$current_status_right" | grep -q "status-line.sh"; then
-    tmux set-option -ag status-right " #($CURRENT_DIR/scripts/status-line.sh)"
+    # Local edit: prepend, so the agent glyphs sit left of the theme's modules
+    tmux set-option -g status-right "#($CURRENT_DIR/scripts/status-line.sh) $current_status_right"
 fi
 
 # Set up daemon monitor to ensure smart-monitor is always running
