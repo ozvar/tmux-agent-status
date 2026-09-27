@@ -375,6 +375,42 @@ collect_data() {
         (( count > 1 )) && PANE_COUNTS[$sname]="${pw}:${pd}:${pwt}"
     done
 
+    # ── 5c. Per-agent header labels ─────────────────────────────
+    # "rank|status|label": the session name for a session's only agent,
+    # otherwise session:window (plus .pane when a window holds several).
+    HEADER_AGENTS=()
+    local -a _hdr=()
+    for sname in "${!sess_agents[@]}"; do
+        local -A _h_st=() _h_win_n=()
+        local _h_pids=()
+        for ap in ${sess_agents[$sname]}; do
+            local pid="${ap%%:*}"
+            [[ -n "${_h_st[$pid]:-}" ]] && continue
+            local rest="${ap#*:}"
+            _h_st[$pid]="${rest#*:}"
+            _h_pids+=("$pid")
+            local wi="${pane_to_window[$pid]:-0}"
+            _h_win_n[$wi]=$(( ${_h_win_n[$wi]:-0} + 1 ))
+        done
+        for pid in "${_h_pids[@]}"; do
+            local ps="${_h_st[$pid]}" rank label wi="${pane_to_window[$pid]:-0}"
+            case "$ps" in
+                working) rank=1 ;; done|ask) rank=2 ;; wait) rank=3 ;; *) continue ;;
+            esac
+            if (( ${#_h_pids[@]} == 1 )); then
+                label="$sname"
+            elif (( ${_h_win_n[$wi]} == 1 )); then
+                label="${sname}:${wi}"
+            else
+                label="${sname}:${wi}.$(tmux display-message -p -t "$pid" '#{pane_index}' 2>/dev/null)"
+            fi
+            _hdr+=("${rank}|${ps}|${label}")
+        done
+    done
+    if (( ${#_hdr[@]} )); then
+        mapfile -t HEADER_AGENTS < <(printf '%s\n' "${_hdr[@]}" | sort -t'|' -k1,1n -k3,3V)
+    fi
+
     # ── 6. Collapse single-worktree parents ────────────────────
     for parent in "${!worktree_children[@]}"; do
         local children=(${worktree_children[$parent]})

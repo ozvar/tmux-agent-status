@@ -66,6 +66,7 @@ declare -A KNOWN_AGENTS=()
 declare -A LIVE_PANES=()
 declare -A PID_PPID=()
 declare -A PANE_COUNTS=()
+HEADER_AGENTS=()
 ENTRIES=()
 SEL_NAMES=()
 SEL_TYPES=()
@@ -88,6 +89,9 @@ serialize_cache() {
         echo "SESS_START:$SESS_START"
         for sname in "${!PANE_COUNTS[@]}"; do
             echo "PC:${sname}:${PANE_COUNTS[$sname]}"
+        done
+        for hdr in "${HEADER_AGENTS[@]}"; do
+            echo "H:${hdr}"
         done
         local si=0
         for entry in "${ENTRIES[@]}"; do

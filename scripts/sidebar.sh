@@ -109,6 +109,7 @@ _HAS_WORKING=0
 ENTRIES=()
 # Per-session pane counts: session → "working:done:wait" (only for multi-agent sessions)
 declare -A PANE_COUNTS=()
+HEADER_AGENTS=()  # "rank|status|label" per agent, from the collector cache
 
 # Parallel arrays for selectable items.
 SEL_NAMES=()     # session name (for S/W) or "session:pane_id" (for P)
@@ -253,6 +254,7 @@ collect() {
     SEL_NAMES=()
     SEL_TYPES=()
     PANE_COUNTS=()
+    HEADER_AGENTS=()
     SESS_START=0
 
     if [ ! -f "$cache_file" ]; then
@@ -269,6 +271,7 @@ collect() {
                 local pcname="${rest%%:*}"
                 PANE_COUNTS[$pcname]="${rest#*:}"
                 ;;
+            H) HEADER_AGENTS+=("${line#H:}") ;;
             E) ENTRIES+=("${line#E:}") ;;
             R)
                 # "R:entry_data\tsel_name\tsel_type"
@@ -346,6 +349,29 @@ render() {
         buf+=" ${BOLD}x${RST} ${CLOSE_CONFIRM_PROMPT}${DIM} [Enter confirm, Esc cancel]${RST}\033[K\n"
     elif (( SEARCH_ACTIVE )); then
         buf+=" ${BOLD}/${RST}${SEARCH_QUERY}${DIM}▏${RST}\033[K\n"
+    elif (( ${#HEADER_AGENTS[@]} )); then
+        # One "glyph label" item per agent, wrapped to the list width.
+        # pos is the screen column the next item starts at.
+        local pos=2 hdr h_st h_label h_glyph item_w
+        buf+=" "
+        for hdr in "${HEADER_AGENTS[@]}"; do
+            h_st="${hdr#*|}"; h_label="${h_st#*|}"; h_st="${h_st%%|*}"
+            (( ${#h_label} > LW - 4 )) && h_label="${h_label:0:$((LW - 5))}…"
+            item_w=$(( 2 + ${#h_label} ))
+            if (( pos > 2 && pos + 2 + item_w - 1 > LW )); then
+                buf+="\033[K\n "; ((line++)); pos=2
+            fi
+            (( pos > 2 )) && { buf+="  "; ((pos += 2)); }
+            case "$h_st" in
+                working) h_glyph="${BYEL}${SPINNER_FRAMES[$SPINNER_TICK]}"
+                         _queue_spinner_target "$((line + 1))" "$pos" "none" "header" ;;
+                wait)    h_glyph="${BCYN}⏸" ;;
+                *)       h_glyph="${BGRN}✓" ;;
+            esac
+            buf+="${h_glyph}${RST} ${h_label}"
+            ((pos += item_w))
+        done
+        buf+="\033[K\n"
     else
         buf+=" "
         (( nw > 0 ))  && buf+="${BYEL}${SPINNER_FRAMES[$SPINNER_TICK]}${nw}${RST} "
