@@ -227,3 +227,39 @@ selection_switch_client() {
             ;;
     esac
 }
+
+# Sidebar switch that never moves the screen the sidebar sits on. If some
+# screen (tmux client) already shows the target's session, only that session's
+# window and pane change. Otherwise the most recently used screen not showing
+# the sidebar's own session is switched to it.
+selection_switch_visible() {
+    local sel_name="$1"
+    local sel_type="$2"
+    local self_pane="$3"
+    local scope session token win_idx own_session client
+    scope=$(selection_scope "$sel_name" "$sel_type") || return 1
+    session=$(selection_session "$sel_name" "$sel_type")
+    token=$(selection_token "$sel_name" "$sel_type")
+
+    if ! tmux list-clients -F '#{client_session}' 2>/dev/null | grep -qFx "$session"; then
+        own_session=$(tmux display-message -p -t "$self_pane" '#{session_name}' 2>/dev/null || true)
+        client=$(tmux list-clients -F $'#{client_activity}\t#{client_name}\t#{client_session}' 2>/dev/null \
+            | awk -F '\t' -v own="$own_session" '$3 != own' | sort -rn | head -1 | cut -f2)
+        if [ -z "$client" ]; then
+            tmux display-message "Session '$session' is not on any screen" 2>/dev/null
+            return 0
+        fi
+        tmux switch-client -c "$client" -t "$session" 2>/dev/null
+    fi
+
+    case "$scope" in
+        pane)
+            win_idx=$(tmux display-message -t "$token" -p "#{window_index}" 2>/dev/null || true)
+            [ -n "$win_idx" ] && tmux select-window -t "${session}:${win_idx}" 2>/dev/null
+            tmux select-pane -t "$token" 2>/dev/null
+            ;;
+        window)
+            tmux select-window -t "${session}:${token#w}" 2>/dev/null
+            ;;
+    esac
+}

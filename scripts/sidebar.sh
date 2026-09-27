@@ -907,7 +907,11 @@ action_switch() {
     local ttype="${SEL_TYPES[$SELECTED]}"
     [[ -z "$target" ]] && return
 
-    selection_switch_client "$target" "$ttype"
+    if (( PREVIEW_MODE )); then
+        selection_switch_client "$target" "$ttype"
+    else
+        selection_switch_visible "$target" "$ttype" "$SELF_PANE"
+    fi
 
     if (( PREVIEW_MODE )); then
         # Popup mode: close on select.
