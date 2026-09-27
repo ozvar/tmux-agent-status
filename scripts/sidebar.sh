@@ -83,6 +83,10 @@ SEARCH_ACTIVE=0
 # Cached values from collect(), used by render().
 CUR_SESSION=""
 CUR_PANE=""
+# What every screen (tmux client) shows. Drives the ACTIVE highlight, while
+# CUR_* (this sidebar's own screen) still drives where the cursor follows.
+declare -A ONSCREEN_SESS=() ONSCREEN_WIN=() ONSCREEN_PANE=()
+ONSCREEN_SIG=""
 
 
 # Screen row (1-based) → selectable index. Populated by render().
@@ -203,6 +207,17 @@ _collect_cur_client() {
     local info
     info=$(tmux display-message -p $'#{client_session}\t#{pane_id}\t#{window_index}' 2>/dev/null || true)
     IFS=$'\t' read -r CUR_SESSION CUR_PANE CUR_WINDOW_INDEX <<< "$info"
+
+    local clients c_sess c_win c_pane
+    clients=$(tmux list-clients -F $'#{client_session}\t#{window_index}\t#{pane_id}' 2>/dev/null | sort || true)
+    ONSCREEN_SESS=(); ONSCREEN_WIN=(); ONSCREEN_PANE=()
+    while IFS=$'\t' read -r c_sess c_win c_pane; do
+        [[ -z "$c_sess" ]] && continue
+        ONSCREEN_SESS[$c_sess]=1
+        ONSCREEN_WIN["$c_sess:$c_win"]=1
+        ONSCREEN_PANE[$c_pane]=1
+    done <<< "$clients"
+    ONSCREEN_SIG="$clients"
 }
 
 _sync_selected_to_current_client() {
@@ -442,7 +457,7 @@ render() {
     # Pre-scan: find sessions whose active pane matches a P/Q child entry,
     # so the parent S/W entry can suppress ACTIVE in favour of the child.
     local -A _active_pane_in_child=()
-    if [[ -n "$cur_pane" ]]; then
+    if (( ${#ONSCREEN_PANE[@]} )); then
         for ((i=0; i<${#render_lines[@]}; i++)); do
             local entry="${render_lines[$i]}"
             local sidx="${render_sel_indices[$i]}"
@@ -458,9 +473,9 @@ render() {
                         _sel_token="${_sel_name#*:}"
                     fi
                     if [[ "$_sel_token" == w* ]]; then
-                        [[ "$_s" == "$cur_session" && "${_sel_token#w}" == "$cur_window_index" ]] && _active_pane_in_child[$_s]=1
+                        [[ -n "${ONSCREEN_WIN[$_s:${_sel_token#w}]:-}" ]] && _active_pane_in_child[$_s]=1
                     else
-                        [[ "$_p" == "$cur_pane" ]] && _active_pane_in_child[$_s]=1
+                        [[ -n "${ONSCREEN_PANE[$_p]:-}" ]] && _active_pane_in_child[$_s]=1
                     fi
                     ;;
             esac
@@ -525,7 +540,7 @@ render() {
             local state="${rest%%|*}"; rest="${rest#*|}"
             local extra="${rest%%|*}"; rest="${rest#*|}"
             local ssh="$rest"
-            [[ "$name" == "$cur_session" && -z "${_active_pane_in_child[$name]:-}" ]] && is_cur=1
+            [[ -n "${ONSCREEN_SESS[$name]:-}" && -z "${_active_pane_in_child[$name]:-}" ]] && is_cur=1
             local _spinner_bg="none"
             (( is_sel )) && _spinner_bg="sel"
             (( ! is_sel && is_cur )) && _spinner_bg="cur"
@@ -588,7 +603,7 @@ render() {
             local extra="${rest%%|*}"; rest="${rest#*|}"
             local ssh="${rest%%|*}"; rest="${rest#*|}"
             local is_last="$rest"
-            [[ "$name" == "$cur_session" && -z "${_active_pane_in_child[$name]:-}" ]] && is_cur=1
+            [[ -n "${ONSCREEN_SESS[$name]:-}" && -z "${_active_pane_in_child[$name]:-}" ]] && is_cur=1
             local _spinner_bg="none"
             (( is_sel )) && _spinner_bg="sel"
             (( ! is_sel && is_cur )) && _spinner_bg="cur"
@@ -653,12 +668,12 @@ render() {
             local istatus="$rest"
             if [[ -n "$token" ]]; then
                 if [[ "$token" == w* ]]; then
-                    [[ "$sess" == "$cur_session" && "${token#w}" == "$cur_window_index" ]] && is_cur=1
+                    [[ -n "${ONSCREEN_WIN[$sess:${token#w}]:-}" ]] && is_cur=1
                 else
-                    [[ "$sess" == "$cur_session" && "$token" == "$cur_pane" ]] && is_cur=1
+                    [[ -n "${ONSCREEN_PANE[$token]:-}" ]] && is_cur=1
                 fi
             else
-                [[ "$sess" == "$cur_session" ]] && is_cur=1
+                [[ -n "${ONSCREEN_SESS[$sess]:-}" ]] && is_cur=1
             fi
             # Mirror selection from SESSIONS section using the row's actual scope token.
             local sel_name="${SEL_NAMES[$SELECTED]:-}"
@@ -717,9 +732,9 @@ render() {
             local sel_type="${SEL_TYPES[$sidx]:-}"
             if [[ "$sel_type" == "P" && "$sel_name" == *:w* ]]; then
                 local sel_sess="${sel_name%%:*}" sel_token="${sel_name#*:}"
-                [[ "$sess" == "$sel_sess" && "$sess" == "$cur_session" && "${sel_token#w}" == "$cur_window_index" ]] && is_cur=1
+                [[ "$sess" == "$sel_sess" && -n "${ONSCREEN_WIN[$sess:${sel_token#w}]:-}" ]] && is_cur=1
             else
-                [[ "$sess" == "$cur_session" && "$pane_id" == "$cur_pane" ]] && is_cur=1
+                [[ -n "${ONSCREEN_PANE[$pane_id]:-}" ]] && is_cur=1
             fi
 
             local _icon _ic; _set_icon_color "$pstatus"
@@ -767,7 +782,7 @@ render() {
             local pstatus="${rest%%|*}"; rest="${rest#*|}"
             local is_last="${rest%%|*}"; rest="${rest#*|}"
             local parent_is_last="$rest"
-            [[ "$sess" == "$cur_session" && "$pane_id" == "$cur_pane" ]] && is_cur=1
+            [[ -n "${ONSCREEN_PANE[$pane_id]:-}" ]] && is_cur=1
 
             local _icon _ic; _set_icon_color "$pstatus"
             local tree="├"; [[ "$is_last" == "1" ]] && tree="└"
@@ -1096,12 +1111,15 @@ while true; do
     if (( NEEDS_COLLECT )); then
         prev_cache_mtime="$_LAST_STATUS_MTIME"
         prev_cur="${CUR_SESSION}|${CUR_PANE}|${CUR_WINDOW_INDEX}"
+        prev_onscreen="$ONSCREEN_SIG"
         collect
         cur_token="${CUR_SESSION}|${CUR_PANE}|${CUR_WINDOW_INDEX}"
         if [[ "$_LAST_STATUS_MTIME" != "$prev_cache_mtime" ]]; then
             NEEDS_RENDER=1
             _PREVIEW_DIRTY=1
         fi
+        # Another screen changed what it shows: redraw, but leave the cursor.
+        [[ "$ONSCREEN_SIG" != "$prev_onscreen" ]] && NEEDS_RENDER=1
         if [[ "$cur_token" != "$prev_cur" ]]; then
             _sync_selected_to_current_client || true
             NEEDS_RENDER=1
