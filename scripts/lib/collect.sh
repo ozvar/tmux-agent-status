@@ -263,6 +263,20 @@ collect_data() {
         sess_agents[$owner]+="${pid_id}:${agent_name}:${pane_status} "
     done
 
+    # Claude session names (set with /rename) keyed by tmux pane id, read from
+    # Claude Code's per-process files. Used as row labels when present.
+    local -A claude_names=()
+    if command -v jq >/dev/null 2>&1; then
+        local cn_pid cn_pane cn_name
+        while IFS=$'\t' read -r cn_pid cn_pane cn_name; do
+            [[ -n "$cn_pane" && -n "$cn_name" ]] || continue
+            kill -0 "$cn_pid" 2>/dev/null || continue
+            claude_names[$cn_pane]="${cn_name//|//}"
+        done < <(jq -r 'select((.name // "") != "" and (.tmux // "") != "")
+                | [.pid, (.tmux | split(".") | last), .name] | @tsv' \
+                "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/"*.json 2>/dev/null)
+    fi
+
     # ── 5. Re-derive session state from per-pane statuses ──────
     for sname in "${!sess_agents[@]}"; do
         local cur_st="${sess_state[$sname]}"
@@ -443,7 +457,7 @@ collect_data() {
                 ((ai++))
                 local pid="${ap%%:*}" r="${ap#*:}"
                 local agent="${r%%:*}" st="${r#*:}"
-                ENTRIES+=("P|${sname}|${pid}|${agent}|${st}|$((ai==total))")
+                ENTRIES+=("P|${sname}|${pid}|${claude_names[$pid]:-$agent}|${st}|$((ai==total))")
                 SEL_NAMES+=("${sname}:${pid}")
                 SEL_TYPES+=("P")
             done
@@ -460,7 +474,7 @@ collect_data() {
                     local ap="${win_agents[$widx]%% *}"
                     local pid="${ap%%:*}" r="${ap#*:}"
                     local st="${r#*:}"
-                    ENTRIES+=("P|${sname}|${pid}|${wname}|${st}|${w_last}")
+                    ENTRIES+=("P|${sname}|${pid}|${claude_names[$pid]:-$wname}|${st}|${w_last}")
                     SEL_NAMES+=("${sname}:w${widx}")
                     SEL_TYPES+=("P")
                 else
@@ -478,7 +492,7 @@ collect_data() {
                         ((ai++))
                         local pid="${wap%%:*}" r="${wap#*:}"
                         local agent="${r%%:*}" st="${r#*:}"
-                        ENTRIES+=("Q|${sname}|${pid}|${agent}|${st}|$((ai==pc))|${w_last}")
+                        ENTRIES+=("Q|${sname}|${pid}|${claude_names[$pid]:-$agent}|${st}|$((ai==pc))|${w_last}")
                         SEL_NAMES+=("${sname}:${pid}")
                         SEL_TYPES+=("P")
                     done
@@ -561,7 +575,9 @@ collect_data() {
                         local r="${ap#*:}"
                         local aname="${r%%:*}"
                         local pst="${r#*:}"
-                        [[ "$pst" == "done" || "$pst" == "ask" ]] && inbox+=("I|${sname}|${pid}|${sname} › ${aname} #${ai}|done")
+                        local ilabel="${aname} #${ai}"
+                        [[ -n "${claude_names[$pid]:-}" ]] && ilabel="${claude_names[$pid]}"
+                        [[ "$pst" == "done" || "$pst" == "ask" ]] && inbox+=("I|${sname}|${pid}|${sname} › ${ilabel}|done")
                     done < <(tmux list-panes -t "${sname}:${only_wi}" -F "#{pane_id}" 2>/dev/null)
                 else
                     local wi=""
@@ -576,7 +592,9 @@ collect_data() {
                             ws="${ws#*:}"
                             [[ "$ws" == "done" || "$ws" == "ask" ]] && any_done=1
                         done
-                        (( any_done )) && inbox+=("I|${sname}|w${wi}|${sname} › ${wname}|done")
+                        local wlabel="$wname" win_one=(${_ib_win[$wi]})
+                        (( ${#win_one[@]} == 1 )) && wlabel="${claude_names[${win_one[0]%%:*}]:-$wname}"
+                        (( any_done )) && inbox+=("I|${sname}|w${wi}|${sname} › ${wlabel}|done")
                     done < <(tmux list-windows -t "$sname" -F "#{window_index}" 2>/dev/null)
                 fi
 
@@ -635,6 +653,14 @@ collect_data() {
             local st="${eff_state[$sname]}"
             local ex="${sess_extra[$sname]}"
             local ss="${sess_ssh[$sname]}"
+            # Tree mode collapses a one-agent session to its session row, so
+            # show that agent's Claude name there (unless a wait timer is shown).
+            if [[ -z "$ex" && "$SIDEBAR_MODE" != "agents" ]]; then
+                local one_agent=(${sess_agents[$sname]:-})
+                if (( ${#one_agent[@]} == 1 )); then
+                    ex="${claude_names[${one_agent[0]%%:*}]:-}"
+                fi
+            fi
             local entry="S|${sname}|${st}|${ex}|${ss}"
             _emit_session "$entry" "$sname"
         done
