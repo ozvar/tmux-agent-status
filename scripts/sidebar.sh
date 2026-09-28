@@ -186,7 +186,7 @@ BGRN=$'\033[1;32m'
 BMAG=$'\033[1;35m'
 BCYN=$'\033[1;36m'
 # Selection highlight: subtle background
-SEL_BG=$'\033[48;5;236m'   # dark gray bg
+SEL_BG=$'\033[48;2;129;161;193m\033[38;2;46;52;64m'   # nord9 bg, nord0 text (yazi's hover look)
 CUR_BG=$'\033[48;5;235m'   # slightly darker for current session accent
 ACC_GRN=$'\033[38;5;114m'  # soft green accent for current session bar
 
